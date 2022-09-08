@@ -5,13 +5,13 @@ VAR = 13
 DELTA = (4 + 4 * VAR) % 3
 
 
-def get_channel(image, channel_num):
+def get_channel(image, channel):
     b, g, r = cv2.split(image)
-    if channel_num == 1:
+    if channel == 'blue':
         return b
-    if channel_num == 2:
+    if channel == 'green':
         return g
-    if channel_num == 3:
+    if channel == 'red':
         return r
 
 
@@ -23,76 +23,93 @@ def convert_to_binary(plane_raw, plane_num):
     return plane_raw >> (plane_num - 1)
 
 
+def svi_1_encode(original_image, watermark, color_channel, bit_plate_num):
+
+    num_for_clear_bit_plate = 255 - (2 ** (bit_plate_num - 1))
+
+    # 1. Поскольку модифицируется 4-й слой, то миккимаус должен быть матрицей, в которой есть только числа 0 и 8 (8 = 0000 1000)
+    # 0 - белый пиксель, 8 - черный пиксель. Тогда при наложении микки на 4-й слой картинка 4-го слоя станет миккимаусом (побитовое сложение)
+    prepared_watermark_colored = ((watermark / 255) * (2 ** (bit_plate_num - 1))).astype(np.uint8)
+    binary_watermark = get_channel(prepared_watermark_colored, color_channel)
+
+    # 2. Вычленим канал
+    # 3. Занулим n-й битовый слой (сделаем белым), чтобы на него нанести миккимауса. Для этого умножим битово картинку
+    # на число, у которого n-й бит = 0: для 4-го бита 1111 0111 = 247
+    channel_with_empty_bit_plate = get_channel(original_image, color_channel) & num_for_clear_bit_plate
+
+    # 4. Наложение микки мауса на 4-й слой путем побитового сложения ("на белый лист кладем форму миккимауса")
+    channel_result = channel_with_empty_bit_plate | binary_watermark
+
+    r = get_channel(baboon_image, 'red')
+    g = get_channel(baboon_image, 'green')
+    b = get_channel(baboon_image, 'blue')
+
+    # 5. Сольем каналы обратно
+    if color_channel == 'blue':
+        return cv2.merge([channel_result, g, r])
+    if color_channel == 'red':
+        return cv2.merge([b, g, channel_result])
+    if color_channel == 'green':
+        return cv2.merge([b, channel_result, r])
+
+
+# СВИ-1 - декодирование (для проверки того, что мы получили реального микимауса,
+# можно попробовать на 8-й битовой плоскости. Т.е. 247 заменить на 127, а 8 на 128
+def svi_1_decode(encoded_image, color_channel, bit_plate_num):
+    encoded_image_channel = get_channel(encoded_image, color_channel)
+    return get_plane(encoded_image_channel, bit_plate_num)
+
+
+def svi_4_encode(original_image, watermark, color_channel, delta):
+    height, width, channels = original_image.shape
+    noise = np.empty((height, width), dtype="uint8")
+    cv2.randn(noise, 0, delta - 1)
+
+    cv2.imshow("Noise", noise)
+
+    extracted_channel = get_channel(original_image, color_channel)
+    binary_watermark = get_channel(watermark, color_channel)
+    changed_channel = (extracted_channel // (2 * delta) * (2 * delta)) + binary_watermark * delta + noise
+
+    r = get_channel(original_image, 'red')
+    g = get_channel(original_image, 'green')
+    b = get_channel(original_image, 'blue')
+
+    if color_channel == 'blue':
+        return noise, cv2.merge([changed_channel, g, r])
+    if color_channel == 'red':
+        return noise, cv2.merge([b, g, changed_channel])
+    if color_channel == 'green':
+        return noise, cv2.merge([b, changed_channel, r])
+
+
+def svi_4_decode(encode_image, original_image, noise, color_channel, delta):
+    encoded_image_channel = get_channel(encode_image, color_channel)
+    original_image_channel = get_channel(original_image, color_channel)
+    return (encoded_image_channel - noise - (original_image_channel // (2 * delta) * 2 * delta)) / delta
+
+
 if __name__ == '__main__':
 
     baboon_image = cv2.imread('baboon.tif')
+    ornament = cv2.imread('ornament.tif')
 
-    # 1. Вычленим синий канал
-    blue_channel = get_channel(baboon_image, 1)
-
-    # 2. Занулим 4-й битовый слой (сделаем белым), чтобы на него нанести миккимауса. Для этого умножим битово картинку
-    # на число, у которого 4-й бит = 0: 1111 0111 = 247
-    blue_channel_4_plate_filled = blue_channel & 247  # Занулим, так как 247 = 1111 0111, т.е. 4-й слой будет нулевым
-
-    # 3. Поскольку модифицируется 4-й слой, то миккимаус должен быть матрицей, в которой есть только числа 0 и 8 (8 = 0000 1000)
-    # 0 - белый пиксель, 8 - черный пиксель. Тогда при наложении микки на 4-й слой картинка 4-го слоя станет миккимаусом (побитовое сложение)
-    mickey_image = ((cv2.imread('ornament.tif') / 255) * 8).astype(np.uint8)
-
-    mickey_image = get_channel(mickey_image, 3)
-
-    # 4. Наложение микки мауса на 4-й слой путем побитового сложения ("на белый лист кладем форму миккимауса")
-    svi_1_result_blue = blue_channel_4_plate_filled | mickey_image
-
-    r = get_channel(baboon_image, 3)
-    g = get_channel(baboon_image, 2)
-
-    # 5. Сольем каналы обратно
-    svi_1_result = cv2.merge([svi_1_result_blue, g, r])
-
-    # СВИ-1 - декодирование (для проверки того, что мы получили реального микимауса,
-    # можно попробовать на 8-й битовой плоскости. Т.е. 247 заменить на 127, а 8 на 128
-    svi_1_result_blue_channel = get_channel(svi_1_result, 1)
-    svi_1_decoded = get_plane(svi_1_result_blue_channel, 4)
+    # СВИ-1
+    svi_1_result = svi_1_encode(baboon_image, ornament, 'blue', 4)
+    svi_1_decode = svi_1_decode(svi_1_result, 'blue', 4)
 
     cv2.imshow("Original", baboon_image)
     cv2.imshow("SVI-1 Encoded", svi_1_result)
-    cv2.imshow("SVI-1 Decoded", svi_1_decoded)
+    cv2.imshow("SVI-1 Decoded", svi_1_decode)
 
     cv2.waitKey(0)
 
     # СВИ-4
-    baboon_image = cv2.imread('baboon.tif')
+    result_noise, svi_4_result = svi_4_encode(baboon_image, ornament, 'green', DELTA)
+    svi_4_decode = svi_4_decode(svi_4_result, baboon_image, result_noise, 'green', DELTA)
 
-    noise = np.empty((512, 512), dtype="uint8")
-    cv2.randn(noise, 0, DELTA - 1)
-
-    cv2.imshow("Original", noise)
-
-    green_channel = get_channel(baboon_image, 2)
-
-    mickey_image = cv2.imread('ornament.tif')
-    mickey_image = get_channel(mickey_image, 2)
-
-    changed_green_channel = (green_channel // (2 * DELTA) * (2 * DELTA)) + mickey_image * DELTA + noise
-
-    cv2.imshow("Result", changed_green_channel)
-
-    r = get_channel(baboon_image, 3)
-    b = get_channel(baboon_image, 1)
-
-    svi_4_result = cv2.merge([b, changed_green_channel, r])
-
-    cv2.imshow("Result", svi_4_result)
+    cv2.imshow("Original", baboon_image)
+    cv2.imshow("SVI-4 Encoded", svi_4_result)
+    cv2.imshow("SVI-4 Decoded", svi_4_decode)
 
     cv2.waitKey(0)
-
-    # СВИ-4 декодирование
-    svi_4_result_green = get_channel(svi_4_result, 2)
-    baboon_image_green = get_channel(baboon_image, 2)
-
-    svi_4_decoded = (svi_4_result_green - noise - (baboon_image_green // (2 * DELTA) * 2 * DELTA)) / DELTA
-    cv2.imshow("Result SVI-4", svi_4_decoded)
-
-    cv2.waitKey(0)
-
-
