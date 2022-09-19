@@ -63,7 +63,7 @@ def svi_1_decode(encoded_image, color_channel, bit_plate_num):
 def svi_4_encode(original_image, watermark, color_channel, delta):
     height, width, channels = original_image.shape
     noise = np.empty((height, width), dtype="uint8")
-    cv2.randn(noise, 0, delta - 1)
+    noise = (np.round(np.random.uniform(0.0, DELTA - 1, (height, width)))).astype("uint8")
 
     cv2.imshow("Noise", noise)
 
