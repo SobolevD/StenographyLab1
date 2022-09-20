@@ -23,11 +23,13 @@ def svi_1_encode(original_image, watermark, color_channel, bit_plate_num):
     num_for_clear_bit_plate = 255 - (2 ** (bit_plate_num - 1))
 
     prepared_watermark_colored = ((watermark / 255) * (2 ** (bit_plate_num - 1))).astype(np.uint8)
-    binary_watermark = get_channel(prepared_watermark_colored, color_channel)
+    single_channel_watermark = get_channel(prepared_watermark_colored, color_channel)
 
     channel_with_empty_bit_plate = get_channel(original_image, color_channel) & num_for_clear_bit_plate
 
-    channel_result = channel_with_empty_bit_plate | binary_watermark
+    channel_result = channel_with_empty_bit_plate | single_channel_watermark
+
+    cv2.imshow(" Channel result", channel_result)
 
     r = get_channel(baboon_image, 'red')
     g = get_channel(baboon_image, 'green')
@@ -60,6 +62,7 @@ def svi_4_encode(original_image, watermark, color_channel, delta):
     binary_watermark = get_channel(watermark, color_channel)
     changed_channel = (extracted_channel // (2 * delta) * (2 * delta)) + binary_watermark * delta + noise
 
+    cv2.imshow(" Channel result", changed_channel)
     r = get_channel(original_image, 'red')
     g = get_channel(original_image, 'green')
     b = get_channel(original_image, 'blue')
@@ -86,7 +89,7 @@ if __name__ == '__main__':
     svi_1_result = svi_1_encode(baboon_image, ornament, 'blue', 4)
     svi_1_decode = svi_1_decode(svi_1_result, 'blue', 4)
 
-    #пороговая обработка
+    # пороговая обработка
     svi_1_decode = svi_1_decode > 7
     svi_1_decode = (svi_1_decode * 255).astype(np.uint8)
 
